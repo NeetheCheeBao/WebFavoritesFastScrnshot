@@ -1,14 +1,19 @@
-# WebFavoritesFastScrnshot
+<div align="center">
+
+# Web Favorites Fast Scrnshot
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows-win.svg)](#)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+</div>
 
 本地 **网页收藏夹 HTML** 树形查看器 + **快速长图截图** 小工具（Netscape Bookmark 格式）
 
 ## 📸 工具截图
 
 ![img](/screenshot/demo1.png)
+![img](/screenshot/demo2.png)
 
 ## ✨ 特色功能
 
