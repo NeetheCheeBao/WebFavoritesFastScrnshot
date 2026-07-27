@@ -33,6 +33,15 @@
 
 前往 [Releases](https://github.com/NeetheCheeBao/WebFavoritesFastScrnshot/releases) 页面下载
 
+## 📚 依赖库
+
+运行 / 编译前请先安装：
+
+| 库 | 用途 |
+| --- | --- |
+| Pillow | 长图截图绘制 |
+| windnd | 拖放文件支持 |
+
 ## 🛠️ 本地编译
 
 ```bash

@@ -16,9 +16,15 @@ try:
 except ImportError:  # pragma: no cover
     Image = ImageDraw = ImageFont = None  # type: ignore
 
+try:
+    import windnd  # Windows drag-and-drop for tkinter
+except ImportError:  # pragma: no cover
+    windnd = None  # type: ignore
+
 # Status bar idle credit (clickable)
 _STATUS_CREDIT = "©2026 NeetheCheeBao"
 _REPO_URL = "https://github.com/NeetheCheeBao/WebFavoritesFastScrnshot"
+_PATH_HINT = "未打开文件 — 请选择或拖入本地 .html 收藏夹文件"
 
 
 def _resource_path(*parts: str) -> str:
@@ -126,6 +132,8 @@ class FavoritesViewer(tk.Tk):
         self._build_ui()
         self._bind_shortcuts()
         self._fit_window_to_toolbar()
+        # Hook after window is mapped; windnd needs a real HWND
+        self.after(100, self._enable_file_drop)
 
         if len(sys.argv) > 1 and sys.argv[1].lower().endswith(".html"):
             self.after(50, lambda: self.open_file(sys.argv[1]))
@@ -201,7 +209,7 @@ class FavoritesViewer(tk.Tk):
         path_frame.pack(side=tk.TOP, fill=tk.X)
         self._path_label = ttk.Label(
             path_frame,
-            text="未打开文件 — 请选择本地 .html 收藏夹文件",
+            text=_PATH_HINT,
             foreground="#888888",
         )
         self._path_label.pack(side=tk.LEFT, fill=tk.X)
@@ -302,6 +310,66 @@ class FavoritesViewer(tk.Tk):
         if path:
             self.open_file(path)
 
+    # ----- Drag & drop (via windnd) -----
+
+    def _enable_file_drop(self) -> None:
+        """Accept .html files dropped onto the window (Windows + windnd)."""
+        if sys.platform != "win32":
+            return
+        if windnd is None:
+            return
+        try:
+            self.update_idletasks()
+            # Queue only inside WndProc — never touch Tk widgets there.
+            self._pending_drop: Optional[List] = None
+
+            def _on_drop(files) -> None:
+                try:
+                    self._pending_drop = list(files) if files else []
+                except Exception:
+                    self._pending_drop = None
+
+            def _poll_drop() -> None:
+                pending = self._pending_drop
+                if pending is not None:
+                    self._pending_drop = None
+                    try:
+                        self._on_files_dropped(pending)
+                    except Exception as e:
+                        messagebox.showerror("打开失败", f"无法打开拖入的文件：\n{e}")
+                self.after(80, _poll_drop)
+
+            # force_unicode=False: windnd unicode mode mis-sizes the buffer
+            # (sizeof bytes vs wchar count) and can crash on drop.
+            windnd.hook_dropfiles(self, func=_on_drop, force_unicode=False)
+            self.after(80, _poll_drop)
+        except Exception:
+            pass
+
+    def _on_files_dropped(self, paths: List) -> None:
+        """Handle paths from a drag-drop; open the first .html file."""
+        if not paths:
+            return
+        normalized: List[str] = []
+        for p in paths:
+            if isinstance(p, bytes):
+                # Prefer filesystem encoding; fall back for odd ANSI paths
+                try:
+                    p = os.fsdecode(p)
+                except Exception:
+                    p = p.decode("gbk", errors="replace")
+            p = str(p).strip().strip('"')
+            if p:
+                normalized.append(p)
+        html_paths = [p for p in normalized if p.lower().endswith(".html")]
+        if not html_paths:
+            messagebox.showerror(
+                "格式不支持",
+                "仅支持拖入 .html 格式的网页收藏夹文件。",
+            )
+            return
+        self.open_file(html_paths[0])
+
     def open_file(self, path: str) -> None:
         path = os.path.abspath(path)
         if not path.lower().endswith(".html"):
@@ -351,7 +419,7 @@ class FavoritesViewer(tk.Tk):
         self._filter_var.set("")
         self._clear_tree()
         self._path_label.configure(
-            text="未打开文件 — 请选择本地 .html 收藏夹文件",
+            text=_PATH_HINT,
             foreground="#888888",
         )
         self.title("WebFavoritesFastScrnshot v1.0.0")
