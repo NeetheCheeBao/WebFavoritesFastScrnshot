@@ -21,6 +21,15 @@ _STATUS_CREDIT = "©2026 NeetheCheeBao"
 _REPO_URL = "https://github.com/NeetheCheeBao/WebFavoritesFastScrnshot"
 
 
+def _resource_path(*parts: str) -> str:
+    """Resolve asset paths for source run and PyInstaller onefile."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS  # type: ignore[attr-defined]
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, *parts)
+
+
 # ---------------------------------------------------------------------------
 # Shared icons (created once; never per-bookmark)
 # ---------------------------------------------------------------------------
@@ -95,6 +104,7 @@ class FavoritesViewer(tk.Tk):
         super().__init__()
         self.title("WebFavoritesFastScrnshot v1.0.0")
         self.configure(bg="#ffffff")
+        self._apply_window_icon()
 
         self._root_node: Optional[BookmarkNode] = None
         self._file_path: Optional[str] = None
@@ -119,6 +129,16 @@ class FavoritesViewer(tk.Tk):
 
         if len(sys.argv) > 1 and sys.argv[1].lower().endswith(".html"):
             self.after(50, lambda: self.open_file(sys.argv[1]))
+
+    def _apply_window_icon(self) -> None:
+        """Set title-bar / taskbar icon from assets/icon.ico when available."""
+        ico = _resource_path("assets", "icon.ico")
+        if not os.path.isfile(ico):
+            return
+        try:
+            self.iconbitmap(ico)
+        except tk.TclError:
+            pass
 
     def _build_style(self) -> None:
         style = ttk.Style(self)

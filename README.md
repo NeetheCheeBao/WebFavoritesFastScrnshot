@@ -31,7 +31,7 @@
 ## 🛠️ 本地编译
 
 ```bash
-py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name WebFavoritesFastScrnshot main.py
+py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name WebFavoritesFastScrnshot --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py
 ```
 
 产物：`dist\WebFavoritesFastScrnshot.exe`
