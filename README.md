@@ -46,7 +46,7 @@
 ```bash
 .\build.bat
 ```
-
+或
 ```bash
 PyInstaller --noconfirm --clean --onefile --windowed --name WebFavoritesFastScrnshot --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py
 ```
