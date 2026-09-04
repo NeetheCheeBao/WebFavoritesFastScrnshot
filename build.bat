@@ -2,10 +2,19 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-where py >nul 2>&1
+where PyInstaller >nul 2>&1
 if errorlevel 1 (
-  echo ERROR: Python launcher ^(py^) not found on PATH.
-  echo Install Python and add it to PATH, or check your Environment Variables.
+  echo ERROR: PyInstaller not found on PATH.
+  echo Install PyInstaller with 'pip install pyinstaller', or check your Environment Variables.
+  echo.
+  pause
+  exit /b 1
+)
+
+where python >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: python not found on PATH.
+  echo Install Python and add it to PATH.
   echo.
   pause
   exit /b 1
@@ -33,11 +42,11 @@ if exist "%NAME%.spec" del /f /q "%NAME%.spec" >nul 2>&1
 mkdir dist 2>nul
 
 call :progress "Analyzing dependencies..."
-py -3 -c "import PyInstaller" >nul 2>&1
+python -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 goto :fail
 
 call :progress "Compiling main.py to executable..."
-py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name %NAME% --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py >nul 2>&1
+PyInstaller --noconfirm --clean --onefile --windowed --name %NAME% --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py >nul 2>&1
 if errorlevel 1 goto :fail
 
 call :progress "Cleaning temporary build files..."

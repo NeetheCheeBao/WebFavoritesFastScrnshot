@@ -43,9 +43,12 @@
 | windnd | 拖放文件支持 |
 
 ## 🛠️ 本地编译
+```bash
+.\build.bat
+```
 
 ```bash
-py -3 -m PyInstaller --noconfirm --clean --onefile --windowed --name WebFavoritesFastScrnshot --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py
+PyInstaller --noconfirm --clean --onefile --windowed --name WebFavoritesFastScrnshot --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py
 ```
 
 产物：`dist\WebFavoritesFastScrnshot.exe`
