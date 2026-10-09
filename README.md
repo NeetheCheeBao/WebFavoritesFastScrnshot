@@ -1,6 +1,6 @@
 <div align="center">
-
-# Web Favorites Fast Scrnshot
+<h1>Web Favorites Fast Scrnshot</h1>
+<img src="assets\icon.ico" width="128" alt="logo" />
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows-win.svg)](#)
@@ -42,20 +42,30 @@
 | Pillow | 长图截图绘制 |
 | windnd | 拖放文件支持 |
 
+## 🛠️ 本地编译
+
+1. 克隆仓库到本地
+```bash
+git clone https://github.com/NeetheCheeBao/WebFavoritesFastScrnshot.git
+```
+
+或
+
+```bash
+gh repo clone NeetheCheeBao/WebFavoritesFastScrnshot
+```
+
+2. 安装依赖库
 ```bash
 pip install Pillow windnd
 ```
 
-## 🛠️ 本地编译
+3. 一键编译
 ```bash
 .\build.bat
 ```
-或
-```bash
-PyInstaller --noconfirm --clean --onefile --windowed --name WebFavoritesFastScrnshot --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py
-```
 
-产物：`dist\WebFavoritesFastScrnshot.exe`
+产物位置：`dist\WebFavoritesFastScrnshot.exe`
 
 ## ⚖️ 许可证
 
