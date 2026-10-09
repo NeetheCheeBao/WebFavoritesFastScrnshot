@@ -12,8 +12,9 @@
 
 ## 📸 工具截图
 
-![img](/screenshot/demo1.png)
-![img](/screenshot/demo2.png)
+| 主程序 | 演示 |
+| :---: | :---: |
+| ![img](/screenshot/demo1.png) | ![img](/screenshot/demo2.png) |
 
 ## ✨ 特色功能
 
