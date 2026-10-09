@@ -42,6 +42,10 @@
 | Pillow | 长图截图绘制 |
 | windnd | 拖放文件支持 |
 
+```bash
+pip install Pillow windnd
+```
+
 ## 🛠️ 本地编译
 ```bash
 .\build.bat
