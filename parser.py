@@ -1,4 +1,4 @@
-"""Parse Netscape Bookmark File Format (.html) into a tree structure."""
+"""把 Netscape Bookmark File Format（.html）解析成树形结构。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import List, Optional
 
 @dataclass
 class BookmarkNode:
-    """A folder or a single bookmark link."""
+    """一个文件夹，或者一条书签链接。"""
 
     title: str
     is_folder: bool
@@ -59,15 +59,15 @@ def _clean_text(raw: str) -> str:
 
 def parse_bookmarks_html(content: str) -> BookmarkNode:
     """
-    Parse a Netscape-format bookmark HTML string.
+    解析 Netscape 格式的收藏夹 HTML 字符串。
 
-    Returns a virtual root whose children are the top-level items
-    (usually a single toolbar folder such as 「收藏夹栏」).
+    返回一个虚拟根节点，它的子节点就是顶层项目
+    （通常只有一个工具栏文件夹，例如「收藏夹栏」）。
     """
-    # Normalize newlines; keep body as one string for index scanning
+    # 统一换行符；正文保持为一个整串，方便按下标扫描
     text = content
 
-    # Find the first top-level <DL> after <H1> (or first DL if no H1)
+    # 找到 <H1> 之后的第一个顶层 <DL>（若没有 <H1> 则取第一个 DL）
     h1 = re.search(r"<H1[^>]*>.*?</H1>", text, re.IGNORECASE | re.DOTALL)
     start = h1.end() if h1 else 0
     m = _DL_OPEN_RE.search(text, start)
@@ -80,12 +80,12 @@ def parse_bookmarks_html(content: str) -> BookmarkNode:
 
 
 def _parse_dl_children(text: str, pos: int) -> tuple[List[BookmarkNode], int]:
-    """Parse items inside a <DL> until the matching </DL>. Returns (nodes, new_pos)."""
+    """解析 <DL> 内部的项目，直到遇到配对的 </DL>。返回 (节点列表, 新位置)。"""
     nodes: List[BookmarkNode] = []
     n = len(text)
 
     while pos < n:
-        # Skip whitespace / stray tags that are not DT/DL
+        # 跳过空白字符，以及不是 DT/DL 的杂散标签
         while pos < n and text[pos] in " \t\r\n":
             pos += 1
         if pos >= n:
@@ -97,14 +97,14 @@ def _parse_dl_children(text: str, pos: int) -> tuple[List[BookmarkNode], int]:
 
         open_dl = _DL_OPEN_RE.match(text, pos)
         if open_dl:
-            # Orphan nested DL without a preceding H3 — treat children as siblings
+            # 前面没有 H3 的孤立嵌套 DL——把它的子节点当作同级节点处理
             nested, pos = _parse_dl_children(text, open_dl.end())
             nodes.extend(nested)
             continue
 
         tag = _TAG_RE.match(text, pos)
         if not tag:
-            # Advance past unknown markup to avoid infinite loop
+            # 跳过无法识别的标记，避免陷入死循环
             next_dt = re.search(r"<DT\s*>", text[pos:], re.IGNORECASE)
             next_close = re.search(r"</DL\s*>", text[pos:], re.IGNORECASE)
             candidates = [x.start() for x in (next_dt, next_close) if x]
@@ -123,7 +123,7 @@ def _parse_dl_children(text: str, pos: int) -> tuple[List[BookmarkNode], int]:
                 is_folder=True,
                 add_date=attrs.get("ADD_DATE"),
             )
-            # Optional following <DL> for children
+            # 后面可能紧跟一个 <DL>，用来存放子节点
             while pos < n and text[pos] in " \t\r\n":
                 pos += 1
             dl = _DL_OPEN_RE.match(text, pos)
@@ -149,8 +149,8 @@ def _parse_dl_children(text: str, pos: int) -> tuple[List[BookmarkNode], int]:
 
 
 def load_bookmarks_file(path: str, encoding: str = "utf-8") -> BookmarkNode:
-    """Load and parse a bookmark .html file from disk."""
-    # Try utf-8 first, then common Chinese encodings
+    """从磁盘读取并解析收藏夹 .html 文件。"""
+    # 先试 utf-8，再依次尝试常见的中文编码
     encodings = [encoding, "utf-8-sig", "gbk", "gb18030", "latin-1"]
     last_err: Optional[Exception] = None
     raw: Optional[str] = None
