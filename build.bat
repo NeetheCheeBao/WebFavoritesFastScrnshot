@@ -30,10 +30,25 @@ if not exist main.py (
 set "NAME=WebFavoritesFastScrnshot"
 set "EXE_OUT=dist\%NAME%.exe"
 set "BAR_WIDTH=30"
-set /a TOTAL_STEPS=5
+set /a TOTAL_STEPS=6
 set /a CURRENT_STEP=0
 
 cls
+
+call :progress "Checking dependencies..."
+set "MISSING="
+for %%m in (PIL windnd PyInstaller) do (
+  python -c "import %%m" >nul 2>&1
+  if errorlevel 1 set "MISSING=!MISSING! %%m"
+)
+if defined MISSING (
+  echo.
+  echo MISSING DEPENDENCIES:!MISSING!
+  echo.
+  echo   pip install Pillow windnd pyinstaller
+  echo.
+  goto :fail
+)
 
 call :progress "Cleaning build artifacts..."
 if exist dist rmdir /s /q dist >nul 2>&1
