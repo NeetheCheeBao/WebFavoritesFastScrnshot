@@ -2,6 +2,8 @@
 
 pub mod bars;
 pub mod context_menu;
+pub mod favicons;
 pub mod icons;
 pub mod layout;
+pub mod main_menu;
 pub mod tree_view;

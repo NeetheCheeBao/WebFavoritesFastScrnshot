@@ -1,9 +1,8 @@
-//! 主窗口与所有原生控件的创建、布局。
-//!
-//! 所有尺寸常量都按 96dpi 的逻辑像素书写，实际使用时经 [`dpi::scaled`] 换算，
-//! 保证 125%/150% 缩放下界面不会过小。
+//! 主窗口与控件布局；尺寸按 96dpi 逻辑像素书写，经 `dpi::scaled` 换算。
 
 use std::mem::zeroed;
+
+use std::cell::RefCell;
 
 use native_windows_gui as nwg;
 use winapi::shared::windef::RECT;
@@ -19,10 +18,7 @@ use crate::ui::{icons, tree_view};
 /// 界面字体族。
 const UI_FONT_FAMILY: &str = "Microsoft YaHei UI";
 
-/// 防抖 / 延时用的计时器。
-///
-/// `nwg::Timer` 基于 `WM_TIMER`，回调在本线程消息循环中派发，
-/// 正好符合"不要在别的线程碰控件"的约束。
+/// 防抖 / 延时用的计时器（基于 `WM_TIMER`，回调在本线程派发）。
 #[allow(deprecated)]
 pub type DebounceTimer = nwg::Timer;
 
@@ -67,10 +63,7 @@ impl Default for Rects {
     }
 }
 
-/// 窗口与控件集合。
-///
-/// `icon` / `font_ui` / `font_tree` / `image_list` / `probe*` 由本结构持有，
-/// 保证对应的 GDI 句柄在程序运行期间始终有效（drop 即销毁）。
+/// 窗口与控件集合；GDI 句柄由本结构持有，drop 时销毁。
 #[allow(dead_code)]
 pub struct Ui {
     pub window: nwg::Window,
@@ -80,8 +73,10 @@ pub struct Ui {
     pub image_list: nwg::ImageList,
     pub btn_open: nwg::Button,
     pub btn_close: nwg::Button,
+    pub btn_icons: nwg::Button,
     pub btn_shot_full: nwg::Button,
     pub btn_shot_neutral: nwg::Button,
+    pub btn_menu: nwg::Button,
     pub btn_expand: nwg::Button,
     pub btn_collapse: nwg::Button,
     pub filter_label: nwg::Label,
@@ -89,6 +84,8 @@ pub struct Ui {
     pub tree: nwg::TreeView,
     pub filter_timer: DebounceTimer,
     pub open_timer: DebounceTimer,
+    /// 工具栏按钮的自然宽度，窗口变宽时按比例分配多余空间
+    button_widths: RefCell<[i32; 8]>,
     /// 文字测量用的离屏画布（不参与显示）
     probe: Canvas,
     /// 界面文字测量字体
@@ -107,14 +104,14 @@ impl Ui {
         let mut window_builder = nwg::Window::builder()
             .title(&title)
             .size((min_width, dpi::scaled(DEFAULT_HEIGHT)))
+            .flags(nwg::WindowFlags::MAIN_WINDOW)
             .accept_files(true);
         if let Some(icon) = &icon {
             window_builder = window_builder.icon(Some(icon));
         }
         window_builder.build(&mut window)?;
 
-        // 注意：nwg 的 `size()` 会被直接当作 lfHeight（像素），
-        // 要让文字等于 9pt/10pt，必须用 `size_absolute()` 传像素高度
+        // `size()` 是 lfHeight 像素值，字号必须用 `size_absolute()` 传像素高度
         let mut font_ui = nwg::Font::default();
         nwg::Font::builder()
             .family(UI_FONT_FAMILY)
@@ -145,15 +142,26 @@ impl Ui {
         let labels = [
             i18n.t("toolbar.open"),
             i18n.t("toolbar.close"),
-            i18n.t("toolbar.screenshot_full"),
-            i18n.t("toolbar.screenshot_neutral"),
+            i18n.t("toolbar.load_icons"),
             i18n.t("toolbar.expand_all"),
             i18n.t("toolbar.collapse_all"),
+            i18n.t("toolbar.screenshot_neutral"),
+            i18n.t("toolbar.screenshot_full"),
+            i18n.t("toolbar.menu"),
         ];
-        let widths: Vec<i32> = labels
+        let mut widths: Vec<i32> = labels
             .iter()
             .map(|text| (probe.text_width(text, &probe_font) + button_text_padding).max(72))
             .collect();
+        if let Some(last) = widths.last_mut() {
+            *last = button_height;
+        }
+        let button_widths: [i32; 8] = widths
+            .iter()
+            .copied()
+            .collect::<Vec<i32>>()
+            .try_into()
+            .expect("按钮数量不匹配");
 
         let mut buttons = Vec::with_capacity(labels.len());
         for (text, width) in labels.iter().zip(&widths) {
@@ -169,10 +177,12 @@ impl Ui {
         let mut buttons = buttons.into_iter();
         let btn_open = buttons.next().expect("按钮数量不匹配");
         let btn_close = buttons.next().expect("按钮数量不匹配");
-        let btn_shot_full = buttons.next().expect("按钮数量不匹配");
-        let btn_shot_neutral = buttons.next().expect("按钮数量不匹配");
+        let btn_icons = buttons.next().expect("按钮数量不匹配");
         let btn_expand = buttons.next().expect("按钮数量不匹配");
         let btn_collapse = buttons.next().expect("按钮数量不匹配");
+        let btn_shot_neutral = buttons.next().expect("按钮数量不匹配");
+        let btn_shot_full = buttons.next().expect("按钮数量不匹配");
+        let btn_menu = buttons.next().expect("按钮数量不匹配");
 
         let mut filter_label = nwg::Label::default();
         nwg::Label::builder()
@@ -215,8 +225,10 @@ impl Ui {
             image_list,
             btn_open,
             btn_close,
+            btn_icons,
             btn_shot_full,
             btn_shot_neutral,
+            btn_menu,
             btn_expand,
             btn_collapse,
             filter_label,
@@ -224,6 +236,7 @@ impl Ui {
             tree,
             filter_timer,
             open_timer,
+            button_widths: RefCell::new(button_widths),
             probe,
             probe_font,
             tree_probe_font,
@@ -251,32 +264,94 @@ impl Ui {
     }
 
     /// 六个工具栏按钮，顺序与界面一致。
-    pub fn buttons(&self) -> [&nwg::Button; 6] {
+    pub fn buttons(&self) -> [&nwg::Button; 8] {
         [
             &self.btn_open,
             &self.btn_close,
-            &self.btn_shot_full,
-            &self.btn_shot_neutral,
+            &self.btn_icons,
             &self.btn_expand,
             &self.btn_collapse,
+            &self.btn_shot_neutral,
+            &self.btn_shot_full,
+            &self.btn_menu,
         ]
+    }
+
+    /// 打开文件后才可用的按钮。
+    pub fn set_doc_buttons_enabled(&self, enabled: bool) {
+        for button in [
+            &self.btn_close,
+            &self.btn_icons,
+            &self.btn_expand,
+            &self.btn_collapse,
+            &self.btn_shot_neutral,
+            &self.btn_shot_full,
+        ] {
+            button.set_enabled(enabled);
+        }
+    }
+
+    /// 图标按钮的文案与可用状态。
+    pub fn set_icons_button(&self, text: &str, enabled: bool) {
+        self.btn_icons.set_text(text);
+        self.btn_icons.set_enabled(enabled);
+    }
+
+    /// 重新套用语言包：窗口标题、按钮文案与筛选标签，并重新测量按钮宽度。
+    pub fn retranslate(&self, i18n: &I18n, meta: &AppMeta) {
+        self.window.set_text(&meta.title(i18n));
+
+        let labels = [
+            i18n.t("toolbar.open"),
+            i18n.t("toolbar.close"),
+            i18n.t("toolbar.load_icons"),
+            i18n.t("toolbar.expand_all"),
+            i18n.t("toolbar.collapse_all"),
+            i18n.t("toolbar.screenshot_neutral"),
+            i18n.t("toolbar.screenshot_full"),
+            i18n.t("toolbar.menu"),
+        ];
+        for (button, label) in self.buttons().iter().zip(labels.iter()) {
+            button.set_text(label);
+        }
+
+        self.filter_label.set_text(i18n.t("filter.label"));
+        *self.button_widths.borrow_mut() = self.measure_button_widths(i18n);
+    }
+
+    fn measure_button_widths(&self, i18n: &I18n) -> [i32; 8] {
+        let labels = [
+            i18n.t("toolbar.open"),
+            i18n.t("toolbar.close"),
+            i18n.t("toolbar.load_icons"),
+            i18n.t("toolbar.expand_all"),
+            i18n.t("toolbar.collapse_all"),
+            i18n.t("toolbar.screenshot_neutral"),
+            i18n.t("toolbar.screenshot_full"),
+            i18n.t("toolbar.menu"),
+        ];
+        let padding = dpi::scaled(BUTTON_TEXT_PADDING);
+
+        let mut widths: Vec<i32> = labels
+            .iter()
+            .map(|text| (self.probe.text_width(text, &self.probe_font) + padding).max(72))
+            .collect();
+        if let Some(last) = widths.last_mut() {
+            *last = dpi::scaled(BUTTON_HEIGHT);
+        }
+
+        widths.try_into().expect("按钮数量不匹配")
     }
 
     /// 工具栏一行按钮占用的总宽度。
     pub fn toolbar_width(&self) -> i32 {
-        let buttons = self.buttons();
         let padding = dpi::scaled(PADDING);
         let gap = dpi::scaled(BUTTON_GAP);
-        let mut width = padding;
 
-        for (index, button) in buttons.iter().enumerate() {
-            width += button.size().0 as i32;
-            if index + 1 < buttons.len() {
-                width += gap;
-            }
-        }
+        let widths = self.button_widths.borrow();
+        let content: i32 = widths.iter().sum::<i32>() + gap * (widths.len() as i32 - 1);
 
-        width + padding
+        padding + content + padding
     }
 
     /// 重新排列所有控件，返回自绘区域位置。
@@ -299,12 +374,35 @@ impl Ui {
         let width = (client.right - client.left).max(min_width);
         let height = (client.bottom - client.top).max(dpi::scaled(MIN_HEIGHT));
 
-        // 第一行：工具栏
+        // 第一行：工具栏（窗口变宽时按自然宽度比例拉伸，保持左右贴边）
         let mut y = padding;
         let mut x = padding;
-        for button in self.buttons() {
+        let buttons = self.buttons();
+        let gap_total = gap * (buttons.len() as i32 - 1);
+        let widths = self.button_widths.borrow();
+        let natural_total: i32 = widths.iter().sum();
+        let available = (width - padding * 2 - gap_total).max(natural_total);
+        let extra = available - natural_total;
+
+        // 最后一个（汉堡）按钮保持正方形，多余空间只分给前面几个
+        let stretch_count = buttons.len() - 1;
+        let stretch_total: i32 = widths[..stretch_count].iter().sum();
+
+        let mut grown = 0;
+        for (index, button) in buttons.iter().enumerate() {
+            let base = widths[index];
+            let grow = if index >= stretch_count {
+                0
+            } else if index + 1 == stretch_count {
+                extra - grown
+            } else {
+                extra * base / stretch_total.max(1)
+            };
+            grown += grow;
+
             button.set_position(x, y);
-            x += button.size().0 as i32 + gap;
+            button.set_size((base + grow).max(1) as u32, button_height as u32);
+            x += base + grow + gap;
         }
         y += button_height + row_gap;
 

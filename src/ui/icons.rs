@@ -1,11 +1,15 @@
-//! 树控件使用的三个共享图标（星标 / 文件夹 / 链接页）。
-//!
-//! 图标在启动时一次性生成并加入 ImageList，绝不为每条书签单独创建，
-//! 这是保证大树展开流畅的关键。
+//! 树控件的三个共享图标，启动时一次性生成并加入 ImageList。
+
+use std::ptr;
 
 use native_windows_gui as nwg;
-
-use crate::screenshot::png;
+use winapi::shared::windef::{HBITMAP, HGDIOBJ};
+use winapi::um::commctrl::ImageList_ReplaceIcon;
+use winapi::um::wingdi::{
+    CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    DIB_RGB_COLORS, RGBQUAD,
+};
+use winapi::um::winuser::{CreateIconIndirect, DestroyIcon, ICONINFO};
 
 /// 图标尺寸（像素）。
 const SIZE: usize = 16;
@@ -13,24 +17,139 @@ const SIZE: usize = 16;
 pub const ICON_FOLDER: i32 = 0;
 pub const ICON_STAR: i32 = 1;
 pub const ICON_LINK: i32 = 2;
+/// 加载图标后，无 favicon 的站点使用的地球图标
+pub const ICON_GLOBE: i32 = 3;
+/// favicon 的起始索引（前四个是共享图标）。
+pub const FAVICON_BASE: i32 = 4;
 
 /// 构建含三个图标的 ImageList。
 pub fn build_image_list() -> Result<nwg::ImageList, nwg::NwgError> {
+    build_image_list_with_favicons(&[])
+}
+
+/// 三个基础图标 + favicon；favicon 从索引 3 开始，顺序与入参一致。
+pub fn build_image_list_with_favicons(favicons: &[Vec<u8>]) -> Result<nwg::ImageList, nwg::NwgError> {
     let mut list = nwg::ImageList::default();
     nwg::ImageList::builder()
         .size((SIZE as i32, SIZE as i32))
-        .initial(3)
+        .initial((4 + favicons.len()) as i32)
         .grow(1)
         .build(&mut list)?;
 
-    for pixels in [folder_icon(), star_icon(), link_icon()] {
-        let encoded = png::encode_rgba(SIZE as u32, SIZE as u32, &pixels);
-        if let Ok(bitmap) = nwg::Bitmap::from_bin(&encoded) {
-            list.add_bitmap(&bitmap);
-        }
+    let link = link_icon();
+    for pixels in [folder_icon(), star_icon(), link.clone(), globe_icon()] {
+        add_pixels(&list, &pixels, &link);
+    }
+    for pixels in favicons {
+        add_pixels(&list, pixels, &link);
     }
 
     Ok(list)
+}
+
+/// 加入一张 16×16 RGBA；失败时用链接图标兜底，保证索引不偏移。
+fn add_pixels(list: &nwg::ImageList, pixels: &[u8], fallback: &[u8]) {
+    for candidate in [pixels, fallback] {
+        if add_rgba(list, candidate) {
+            return;
+        }
+    }
+}
+
+/// 通过 HICON 加入 ImageList：`ImageList_ReplaceIcon` 会保留 alpha，
+/// 而 nwg 的 `add_bitmap` 走 `ImageList_AddMasked`，会把纯黑当透明色抠掉。
+fn add_rgba(list: &nwg::ImageList, rgba: &[u8]) -> bool {
+    let Some(icon) = build_icon(rgba) else {
+        return false;
+    };
+
+    unsafe {
+        let index = ImageList_ReplaceIcon(list.handle, -1, icon);
+        DestroyIcon(icon);
+        index >= 0
+    }
+}
+
+fn build_icon(rgba: &[u8]) -> Option<winapi::shared::windef::HICON> {
+    if rgba.len() < SIZE * SIZE * 4 {
+        return None;
+    }
+
+    unsafe {
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: SIZE as i32,
+                biHeight: -(SIZE as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                biSizeImage: (SIZE * SIZE * 4) as u32,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [RGBQUAD {
+                rgbBlue: 0,
+                rgbGreen: 0,
+                rgbRed: 0,
+                rgbReserved: 0,
+            }],
+        };
+
+        let mut bits: *mut winapi::ctypes::c_void = ptr::null_mut();
+        let color: HBITMAP = CreateDIBSection(
+            ptr::null_mut(),
+            &info,
+            DIB_RGB_COLORS,
+            &mut bits as *mut *mut winapi::ctypes::c_void,
+            ptr::null_mut(),
+            0,
+        );
+        if color.is_null() || bits.is_null() {
+            return None;
+        }
+
+        let dst = std::slice::from_raw_parts_mut(bits as *mut u8, SIZE * SIZE * 4);
+        let mut mask_bits = [0u8; SIZE * 2];
+        for index in 0..SIZE * SIZE {
+            let alpha = rgba[index * 4 + 3];
+            dst[index * 4] = rgba[index * 4 + 2];
+            dst[index * 4 + 1] = rgba[index * 4 + 1];
+            dst[index * 4 + 2] = rgba[index * 4];
+            dst[index * 4 + 3] = alpha;
+
+            if alpha == 0 {
+                let (x, y) = (index % SIZE, index / SIZE);
+                mask_bits[y * 2 + x / 8] |= 0x80 >> (x % 8);
+            }
+        }
+
+        let mask = CreateBitmap(
+            SIZE as i32,
+            SIZE as i32,
+            1,
+            1,
+            mask_bits.as_ptr() as *const winapi::ctypes::c_void,
+        );
+
+        let mut icon_info: ICONINFO = std::mem::zeroed();
+        icon_info.fIcon = 1;
+        icon_info.hbmColor = color;
+        icon_info.hbmMask = mask;
+
+        let icon = CreateIconIndirect(&mut icon_info);
+
+        DeleteObject(color as HGDIOBJ);
+        DeleteObject(mask as HGDIOBJ);
+
+        if icon.is_null() {
+            None
+        } else {
+            Some(icon)
+        }
+    }
 }
 
 /// 极简 RGBA 画布，用于生成 16×16 图标。
@@ -152,6 +271,34 @@ fn star_icon() -> Vec<u8> {
 
     for &(x, y) in POINTS {
         canvas.set(x, y, body);
+    }
+
+    canvas.into_pixels()
+}
+
+pub fn globe_icon() -> Vec<u8> {
+    let mut canvas = IconCanvas::new();
+    let center = 7.5f32;
+    let radius = 6.2f32;
+    let ink = (90, 90, 90);
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as f32 + 0.5 - center;
+            let dy = y as f32 + 0.5 - center;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > radius + 0.6 {
+                continue;
+            }
+
+            let ring = (distance - radius).abs() < 0.9;
+            let equator = dy.abs() < 0.6;
+            let meridian = (dx.abs() - radius * 0.55 * (1.0 - (dy / radius).powi(2)).max(0.0).sqrt()).abs() < 0.6;
+
+            if ring || equator || meridian {
+                canvas.set(x, y, ink);
+            }
+        }
     }
 
     canvas.into_pixels()

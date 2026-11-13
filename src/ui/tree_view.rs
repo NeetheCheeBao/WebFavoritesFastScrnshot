@@ -12,8 +12,7 @@ use winapi::um::winuser::{
 /// 树中当前可见的一行（只包含展开路径上的节点）。
 #[derive(Debug, Clone)]
 pub struct VisibleRow {
-    /// 节点在 arena 中的下标（渲染时可回溯到原始节点）
-    #[allow(dead_code)]
+    /// 节点在 arena 中的下标
     pub node: usize,
     /// 层级，根文件夹为 0
     pub depth: i32,
@@ -25,13 +24,7 @@ pub struct VisibleRow {
     pub has_children: bool,
 }
 
-/// 修正原生树控件的样式：
-/// * 补上纵向滚动条（NWG 默认没有带）；
-/// * 去掉 `TVS_EDITLABELS`，避免用户误改节点文字；
-/// * 缩进设为 20px，与原版观感一致。
-///
-/// 横向滚动条由 [`set_horizontal_scroll`] 按内容宽度动态开关，
-/// 避免出现一条永远空着的灰条。
+/// 修正原生树控件样式：补纵向滚动条、去掉 `TVS_EDITLABELS`、缩进 20px。
 pub fn configure(hwnd: HWND) {
     unsafe {
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
@@ -41,7 +34,7 @@ pub fn configure(hwnd: HWND) {
             SetWindowLongW(hwnd, GWL_STYLE, updated as i32);
         }
 
-        // 凹陷的客户区边框，与原版 Treeview 外层边框一致
+        // 凹陷的客户区边框
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
         if ex_style & WS_EX_CLIENTEDGE == 0 {
             SetWindowLongW(hwnd, GWL_EXSTYLE, (ex_style | WS_EX_CLIENTEDGE) as i32);
@@ -113,7 +106,6 @@ pub fn set_redraw(tree: &nwg::TreeView, enabled: bool) {
     }
 }
 
-/// 恢复重绘后请求一次整块刷新。
 pub fn refresh(tree: &nwg::TreeView) {
     if let Some(hwnd) = tree.handle.hwnd() {
         unsafe {
@@ -122,7 +114,6 @@ pub fn refresh(tree: &nwg::TreeView) {
     }
 }
 
-/// 开关树控件的横向/纵向滚动条。
 pub fn set_scrollbars(hwnd: HWND, vertical: bool, horizontal: bool) {
     unsafe {
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
@@ -156,7 +147,6 @@ pub fn copy_item(item: &nwg::TreeItem) -> nwg::TreeItem {
     }
 }
 
-/// 读取展开状态。
 pub fn is_expanded(tree: &nwg::TreeView, item: &nwg::TreeItem) -> bool {
     tree.item_state(item)
         .map(|state| state.contains(nwg::TreeItemState::EXPANDED))

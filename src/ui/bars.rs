@@ -1,10 +1,4 @@
-//! 底部两条栏（信息栏 + 状态栏）与路径行的自绘。
-//!
-//! 原生 Label 无法同时满足"文字色 + 悬停下划线 + 手型光标"的要求，
-//! 因此这些区域直接画在主窗口客户区里，行为和配色与原版一致。
-//!
-//! 背景擦除与内容绘制共用同一套绘制代码：系统在某些时序下只发
-//! `WM_ERASEBKGND` 而不补 `WM_PAINT`，这样处理后两种情况都能得到正确画面。
+//! 路径行与底部两条栏自绘（原生 Label 无法满足文字色/下划线/手型光标）。
 
 use std::mem::zeroed;
 
@@ -93,7 +87,6 @@ pub fn erase_background(hwnd: HWND, content: &BarContent, fonts: &BarFonts) {
     }
 }
 
-/// 响应 `WM_PAINT` 绘制。
 pub fn paint(hwnd: HWND, content: &BarContent, fonts: &BarFonts) {
     unsafe {
         let mut paint_struct: PAINTSTRUCT = zeroed();
@@ -106,7 +99,6 @@ pub fn paint(hwnd: HWND, content: &BarContent, fonts: &BarFonts) {
     }
 }
 
-/// 判断某个客户区坐标是否落在状态栏上。
 pub fn is_in_status_bar(hwnd: HWND, y: i32) -> bool {
     unsafe {
         let mut client: RECT = zeroed();
@@ -115,7 +107,6 @@ pub fn is_in_status_bar(hwnd: HWND, y: i32) -> bool {
     }
 }
 
-/// 绘制背景、路径行、信息栏与状态栏。
 fn render(dc: HDC, hwnd: HWND, content: &BarContent, fonts: &BarFonts) {
     unsafe {
         let mut client: RECT = zeroed();
@@ -276,8 +267,7 @@ unsafe fn draw_text(
     }
 
     let previous = SelectObject(dc, font as HGDIOBJ);
-    // ClearType 需要已知底色：用不透明背景模式并指定与栏相同的底色，
-    // 否则半透明混合会让小字发虚、出现彩边
+// ClearType 需要已知底色，否则小字发虚、出现彩边
     SetBkMode(dc, OPAQUE as i32);
     SetBkColor(dc, background);
     SetTextColor(dc, color);
