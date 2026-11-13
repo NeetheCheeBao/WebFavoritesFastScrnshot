@@ -8,9 +8,6 @@ use winapi::um::knownfolders::FOLDERID_Downloads;
 use winapi::um::shlobj::SHGetKnownFolderPath;
 
 /// 当前用户的「下载」目录；取不到时返回 `None`。
-///
-/// 使用 `SHGetKnownFolderPath` 而不是拼 `%USERPROFILE%\Downloads`，
-/// 这样用户把「下载」重定向到其它盘符时也能正确定位。
 pub fn downloads_dir() -> Option<PathBuf> {
     unsafe {
         let mut raw: *mut u16 = ptr::null_mut();

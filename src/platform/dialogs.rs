@@ -1,7 +1,4 @@
-//! 打开/保存文件对话框。
-//!
-//! 使用经典的 `GetOpenFileNameW` / `GetSaveFileNameW`，与原版 Tk 的
-//! `askopenfilename` / `asksaveasfilename` 行为最接近（支持初始文件名与初始目录）。
+//! 打开/保存文件对话框（`GetOpenFileNameW` / `GetSaveFileNameW`）。
 
 use std::mem::{size_of, zeroed};
 use std::path::{Path, PathBuf};
@@ -69,8 +66,7 @@ pub fn save_png(
     let default_ext = to_wide("png");
     let initial_dir_wide = initial_dir.map(|dir| to_wide(&dir.to_string_lossy()));
 
-    // 初始内容直接给完整路径：新版保存对话框在部分系统上会忽略
-    // lpstrInitialDir，把目录写进文件名框才能稳定落到目标文件夹
+    // 完整路径写进 lpstrFile：部分系统会忽略 lpstrInitialDir
     let initial_path = match initial_dir.as_deref() {
         Some(dir) => dir.join(initial_name),
         None => PathBuf::from(initial_name),

@@ -1,7 +1,4 @@
-//! 收藏夹文件的编码探测。
-//!
-//! 顺序与 Python 版本一致：UTF-8 → GBK(936) → GB18030(54936) → Latin-1 兜底。
-//! GBK / GB18030 借助系统代码页解码，无需额外依赖。
+//! 编码探测：UTF-8 → GBK(936) → GB18030(54936) → Latin-1 兜底。
 
 use std::ptr;
 use winapi::um::stringapiset::MultiByteToWideChar;
@@ -36,7 +33,7 @@ fn strip_bom(bytes: &[u8]) -> &[u8] {
     }
 }
 
-/// 用系统代码页解码；遇到非法字节返回 None（与 Python 的 strict 行为一致）。
+/// 用系统代码页解码；遇到非法字节返回 None。
 fn decode_codepage(bytes: &[u8], codepage: u32) -> Option<String> {
     if bytes.is_empty() {
         return Some(String::new());

@@ -1,7 +1,4 @@
-//! 程序元信息（名称、版本）与资源路径解析。
-//!
-//! 名称与版本来自项目根目录的 `version.ini`；文件缺失时回退到编译期嵌入的副本，
-//! 因此单独分发 exe 也能正常显示标题。
+//! 程序元信息与资源路径解析；名称与版本来自 `version.ini`，缺失时用编译期嵌入的副本。
 
 pub mod ini;
 
@@ -12,11 +9,13 @@ use crate::i18n::I18n;
 /// 编译期嵌入的版本文件，作为运行时缺失的后备。
 const EMBEDDED_VERSION_INI: &str = include_str!("../../version.ini");
 
-/// 状态栏空闲时显示的版权信息（写死在代码里，不进语言包）。
+/// 状态栏空闲时显示的信息
 pub const COPYRIGHT: &str = "©2026 NeetheCheeBao";
 
-/// 项目仓库地址（点击版权信息时打开）。
+/// 项目仓库地址
 pub const REPOSITORY_URL: &str = "https://github.com/NeetheCheeBao/WebFavoritesFastScrnshot";
+/// 发布页地址（检查更新）。
+pub const RELEASES_URL: &str = "https://github.com/NeetheCheeBao/WebFavoritesFastScrnshot/releases";
 
 /// 程序名与版本号。
 #[derive(Debug, Clone)]
@@ -38,7 +37,6 @@ impl AppMeta {
         }
     }
 
-    /// 按语言包模板拼出窗口标题，例如 `WebFavoritesFastScrnshot v1.0.2`。
     pub fn title(&self, i18n: &I18n) -> String {
         i18n.fmt(
             "app.window_title",
@@ -47,7 +45,6 @@ impl AppMeta {
     }
 }
 
-/// 可执行文件所在目录。
 pub fn exe_dir() -> Option<PathBuf> {
     std::env::current_exe()
         .ok()

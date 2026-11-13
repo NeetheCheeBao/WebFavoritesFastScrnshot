@@ -10,12 +10,10 @@ use winapi::um::winuser::{
     IDYES, MB_ICONERROR, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK, MB_YESNO, SW_SHOWNORMAL,
 };
 
-/// 转成以 0 结尾的 UTF-16 缓冲区。
 pub fn to_wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// 用系统默认浏览器打开链接。
 pub fn open_url(url: &str) -> Result<(), String> {
     let operation = to_wide("open");
     let target = to_wide(url);
@@ -39,7 +37,6 @@ pub fn open_url(url: &str) -> Result<(), String> {
     }
 }
 
-/// 在资源管理器中定位并选中该文件。
 pub fn reveal_in_explorer(path: &std::path::Path) -> Result<(), String> {
     let program = to_wide("explorer.exe");
     let parameters = to_wide(&format!("/select,\"{}\"", path.display()));
@@ -63,14 +60,12 @@ pub fn reveal_in_explorer(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
-/// 消息框图标。
 #[derive(Clone, Copy)]
 pub enum MessageIcon {
     Error,
     Info,
 }
 
-/// 显示一个确定框。
 pub fn message(parent: Option<HWND>, title: &str, text: &str, icon: MessageIcon) {
     let icon_flag = match icon {
         MessageIcon::Error => MB_ICONERROR,
@@ -79,7 +74,6 @@ pub fn message(parent: Option<HWND>, title: &str, text: &str, icon: MessageIcon)
     show(parent, title, text, MB_OK | icon_flag);
 }
 
-/// 显示「是/否」确认框，返回是否选择了「是」。
 pub fn confirm(parent: Option<HWND>, title: &str, text: &str) -> bool {
     show(parent, title, text, MB_YESNO | MB_ICONQUESTION) == IDYES
 }

@@ -1,7 +1,4 @@
-//! Netscape Bookmark File Format（浏览器导出的收藏夹 .html）解析。
-//!
-//! 结构与 Python 版本保持一致：从 `<H1>` 之后的第一个 `<DL>` 开始递归下降，
-//! 遇到 `<DT><H3>` 建文件夹、`<DT><A>` 建书签，遇到 `</DL>` 结束当前层级。
+//! Netscape 收藏夹 HTML 解析：从 `<H1>` 后的第一个 `<DL>` 开始递归下降。
 
 pub mod entities;
 

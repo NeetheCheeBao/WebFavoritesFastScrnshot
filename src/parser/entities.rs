@@ -1,7 +1,4 @@
-//! HTML 实体解码。
-//!
-//! 收藏夹标题里常见的是 `&amp;`、`&lt;`、`&quot;`、`&#39;` 一类，
-//! 这里覆盖了常用命名实体与全部数字实体；未收录的命名实体按原文保留。
+//! HTML 实体解码：覆盖常用命名实体与全部数字实体，未收录的按原文保留。
 
 /// 常用命名实体表（不含结尾分号）。
 const NAMED: &[(&str, char)] = &[
@@ -152,7 +149,6 @@ const NAMED: &[(&str, char)] = &[
     ("yuml", 'ÿ'),
 ];
 
-/// 把 HTML 实体还原成字符。
 pub fn unescape(input: &str) -> String {
     if !input.contains('&') {
         return input.to_string();

@@ -1,7 +1,4 @@
-//! 极简 INI 解析器。
-//!
-//! 只覆盖本项目用到的语法：分节、键值对、行首注释、成对引号。
-//! 值内部允许出现 `#`、`;`、`=`，因此不做行内注释剥离。
+//! 极简 INI 解析器：分节、键值对、行首注释、成对引号；不做行内注释剥离。
 
 use std::collections::HashMap;
 
@@ -48,7 +45,6 @@ impl Ini {
         ini
     }
 
-    /// 读取某个分节下的键值。
     pub fn get(&self, section: &str, key: &str) -> Option<&str> {
         self.sections
             .get(&section.to_ascii_lowercase())
@@ -56,18 +52,15 @@ impl Ini {
             .map(|s| s.as_str())
     }
 
-    /// 读取键值，缺失时返回默认值。
     pub fn get_or(&self, section: &str, key: &str, default: &str) -> String {
         self.get(section, key).unwrap_or(default).to_string()
     }
 
-    /// 遍历所有分节。
     pub fn sections(&self) -> impl Iterator<Item = (&String, &HashMap<String, String>)> {
         self.sections.iter()
     }
 }
 
-/// 去掉值两端成对的单/双引号。
 fn unquote(value: &str) -> &str {
     let bytes = value.as_bytes();
     if bytes.len() >= 2 {

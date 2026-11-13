@@ -1,8 +1,4 @@
-//! 启用 comctl32 v6 视觉样式。
-//!
-//! 没有应用程序清单时，进程会加载 comctl32 v5，按钮/输入框/树/滚动条都会退化成
-//! Win95 经典外观。这里在启动阶段挂一个激活上下文（activation context），
-//! 让后续加载的 comctl32 解析到 v6 版本，无需构建脚本或 rc.exe。
+//! 启动时激活 comctl32 v6 视觉样式（挂激活上下文，无需外部清单）。
 
 use std::mem::{size_of, zeroed};
 use std::path::PathBuf;
@@ -12,7 +8,7 @@ use winapi::um::winbase::{
     ActivateActCtx, CreateActCtxW, DeactivateActCtx, ReleaseActCtx, ACTCTXW,
 };
 
-/// 只声明 comctl32 v6 依赖，不在此处声明 DPI（运行时再设已来不及）。
+/// 只声明 comctl32 v6 依赖。
 const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity type="win32" name="WebFavoritesFastScrnshot" version="1.0.0.0" processorArchitecture="*"/>

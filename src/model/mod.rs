@@ -1,8 +1,4 @@
-//! 收藏夹树的数据模型。
-//!
-//! 采用"索引数组 + 子节点下标"的扁平结构（arena），避免深层嵌套带来的
-//! 生命周期与所有权问题；节点一旦建好就不再增删，索引可直接作为树控件的
-//! 关联数据（lParam）。
+//! 收藏夹树模型：索引数组（arena），子节点存下标，节点下标即树控件的 lParam。
 
 /// 一个文件夹，或一条书签链接。
 #[derive(Debug, Clone)]
@@ -10,7 +6,7 @@ pub struct BookmarkNode {
     pub title: String,
     pub is_folder: bool,
     pub url: Option<String>,
-    /// 收藏夹导出的 favicon（base64 data URI）。为性能刻意不加载，仅保留解析结果。
+    /// 收藏夹导出的 favicon（base64 data URI），仅解析不使用。
     #[allow(dead_code)]
     pub icon: Option<String>,
     pub add_date: Option<String>,
@@ -75,7 +71,6 @@ impl Arena {
         self.nodes[root].children.clone()
     }
 
-    /// 统计某节点下的书签总数。
     pub fn count_links(&self, index: usize) -> usize {
         let mut total = 0;
         let mut stack = vec![index];
