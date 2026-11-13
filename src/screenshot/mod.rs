@@ -1,9 +1,4 @@
-//! 把当前展开状态渲染成一张长图。
-//!
-//! 宽度只由标题长度与层级决定，与窗口大小无关；按 2 倍像素密度绘制，
-//! 保证文字与图标清晰。两种模式：
-//! * `Full`：所有标题完整绘制，宽度取最长一行；
-//! * `Neutral`：超长标题截断为省略号，宽度按整体分布计算。
+//! 按当前展开状态渲染长图：2 倍像素密度；`Full` 完整绘制，`Neutral` 截断超长标题。
 
 pub mod gdi;
 pub mod png;
@@ -31,8 +26,19 @@ pub enum ShotMode {
     Neutral,
 }
 
-/// 渲染长图，返回 PNG 字节流。
-pub fn render(rows: &[VisibleRow], mode: ShotMode) -> Result<Vec<u8>, String> {
+/// favicon 像素与索引：`pixels[i]` 对应图像索引 `icons::FAVICON_BASE + i`。
+pub struct FaviconPixels<'a> {
+    pub pixels: &'a [Vec<u8>],
+    pub indices: &'a [Option<i32>],
+    /// 无 favicon 的站点使用的地球图标
+    pub globe: &'a [u8],
+}
+
+pub fn render_with_favicons(
+    rows: &[VisibleRow],
+    mode: ShotMode,
+    favicons: Option<FaviconPixels>,
+) -> Result<Vec<u8>, String> {
     if rows.is_empty() {
         return Err("没有可绘制的内容".to_string());
     }
@@ -109,20 +115,34 @@ pub fn render(rows: &[VisibleRow], mode: ShotMode) -> Result<Vec<u8>, String> {
         }
         left += indicator_w;
 
-        let icon = if row.is_top {
-            IconKind::Star
-        } else if row.is_folder {
-            IconKind::Folder
-        } else {
-            IconKind::Link
-        };
-        draw_icon(
-            &canvas,
-            icon,
-            left,
-            top + (row_h - icon_size) / 2,
-            icon_size,
-        );
+        let favicon = favicons.as_ref().and_then(|set| {
+            if row.is_top || row.is_folder {
+                return None;
+            }
+            let index = set.indices.get(row.node).copied().flatten()?;
+            let slot = (index - crate::ui::icons::FAVICON_BASE) as usize;
+            set.pixels.get(slot).map(|pixels| pixels.as_slice())
+        });
+
+        let icon_top = top + (row_h - icon_size) / 2;
+        match favicon {
+            Some(pixels) => canvas.draw_rgba(pixels, 16, left, icon_top, icon_size),
+            None if favicons.is_some() && !row.is_top && !row.is_folder => {
+                if let Some(set) = favicons.as_ref() {
+                    canvas.draw_rgba(set.globe, 16, left, icon_top, icon_size);
+                }
+            }
+            None => {
+                let icon = if row.is_top {
+                    IconKind::Star
+                } else if row.is_folder {
+                    IconKind::Folder
+                } else {
+                    IconKind::Link
+                };
+                draw_icon(&canvas, icon, left, icon_top, icon_size);
+            }
+        }
         left += icon_size + gap;
 
         let text_top = top + (row_h - text_h) / 2;
@@ -133,7 +153,6 @@ pub fn render(rows: &[VisibleRow], mode: ShotMode) -> Result<Vec<u8>, String> {
     Ok(png::encode_rgba(width as u32, height as u32, &pixels))
 }
 
-/// 把 PNG 字节写入磁盘。
 pub fn save(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|error| error.to_string())
 }
@@ -284,8 +303,7 @@ mod tests {
         assert_eq!(fit_text("abcdef", 5, measure), "");
     }
 
-    /// 生成样张供人工检查排版（默认忽略）。
-    /// 运行：`cargo test --offline -- --ignored --nocapture`
+/// 生成样张供人工检查（`cargo test --offline -- --ignored --nocapture`）。
     #[test]
     #[ignore = "生成排版样张，供人工检查"]
     fn renders_sample_image() {
@@ -442,7 +460,7 @@ mod tests {
             (ShotMode::Full, ".temp/render_full.png"),
             (ShotMode::Neutral, ".temp/render_neutral.png"),
         ] {
-            let png = render(&rows, mode).expect("渲染失败");
+            let png = render_with_favicons(&rows, mode, None).expect("渲染失败");
             std::fs::write(name, png).expect("写入样张失败");
         }
     }

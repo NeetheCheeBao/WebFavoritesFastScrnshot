@@ -1,7 +1,4 @@
-//! 基于 GDI 的离屏绘图画布。
-//!
-//! 用一个 32 位自上而下的 DIB 作为绘制目标，先画到内存里，再取回像素编码 PNG。
-//! 这样文字由系统字体渲染，中文与字体外观与原版（Pillow 绘制）基本一致。
+//! 基于 GDI 的离屏画布：32 位自上而下 DIB，文字由系统字体渲染。
 
 use std::mem::{size_of, zeroed};
 use std::ptr;
@@ -94,7 +91,43 @@ impl Canvas {
         }
     }
 
-    /// 用纯色填充矩形。
+    /// 把 `src × src` 的 RGBA 图像按最近邻缩放到目标矩形并做 alpha 混合。
+    pub fn draw_rgba(&self, pixels: &[u8], src: i32, x: i32, y: i32, size: i32) {
+        if src <= 0 || size <= 0 || pixels.len() < (src * src * 4) as usize {
+            return;
+        }
+
+        for dy in 0..size {
+            let sy = (dy * src / size).min(src - 1);
+            for dx in 0..size {
+                let tx = x + dx;
+                let ty = y + dy;
+                if tx < 0 || ty < 0 || tx >= self.width || ty >= self.height {
+                    continue;
+                }
+
+                let sx = (dx * src / size).min(src - 1);
+                let si = ((sy * src + sx) * 4) as usize;
+                let alpha = pixels[si + 3] as u32;
+                if alpha == 0 {
+                    continue;
+                }
+
+                unsafe {
+                    let offset = (ty * self.width + tx) as isize;
+                    let dst = *self.bits.offset(offset);
+                    let blend = |src: u8, dst: u32| {
+                        ((src as u32 * alpha + dst * (255 - alpha)) / 255) & 0xFF
+                    };
+                    let red = blend(pixels[si], (dst >> 16) & 0xFF);
+                    let green = blend(pixels[si + 1], (dst >> 8) & 0xFF);
+                    let blue = blend(pixels[si + 2], dst & 0xFF);
+                    *self.bits.offset(offset) = blue | (green << 8) | (red << 16) | (0xFF << 24);
+                }
+            }
+        }
+    }
+
     pub fn fill(&self, left: i32, top: i32, right: i32, bottom: i32, color: u32) {
         unsafe {
             let brush = CreateSolidBrush(color);
@@ -109,12 +142,11 @@ impl Canvas {
         }
     }
 
-    /// 画一条横线（以矩形填充实现，可指定粗细）。
     pub fn hline(&self, left: i32, right: i32, top: i32, color: u32, thickness: i32) {
         self.fill(left, top, right + 1, top + thickness.max(1), color);
     }
 
-    /// 画填充 + 描边的矩形，边界包含右下角（与 Pillow 的语义一致）。
+    /// 画填充 + 描边的矩形，边界包含右下角。
     pub fn rect(&self, left: i32, top: i32, right: i32, bottom: i32, fill: u32, outline: u32) {
         unsafe {
             let brush = CreateSolidBrush(fill);
@@ -131,7 +163,6 @@ impl Canvas {
         }
     }
 
-    /// 只画描边矩形，线宽由 `thickness` 控制。
     pub fn stroke_rect(
         &self,
         left: i32,
@@ -148,7 +179,6 @@ impl Canvas {
         self.fill(right - t + 1, top, right + 1, bottom + 1, color);
     }
 
-    /// 画多边形（填充 + 描边）。
     pub fn polygon(&self, points: &[(i32, i32)], fill: u32, outline: u32) {
         if points.len() < 3 {
             return;
@@ -190,7 +220,6 @@ impl Canvas {
         }
     }
 
-    /// 文字像素宽度。
     pub fn text_width(&self, text: &str, font: &Font) -> i32 {
         let wide: Vec<u16> = text.encode_utf16().collect();
         if wide.is_empty() {
@@ -206,7 +235,6 @@ impl Canvas {
         }
     }
 
-    /// 文字单元格高度（上伸 + 下伸）。
     pub fn text_height(&self, font: &Font) -> i32 {
         unsafe {
             let previous = SelectObject(self.dc, font.handle as HGDIOBJ);
@@ -250,7 +278,6 @@ pub struct Font {
 }
 
 impl Font {
-    /// 按像素高度创建字体。
     pub fn new(pixel_height: i32, family: &str) -> Font {
         Font::with_underline(pixel_height, family, false)
     }
