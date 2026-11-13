@@ -9,15 +9,16 @@ use crate::parser::{self, ParseError, ParseOptions};
 use crate::platform::{dialogs, encoding, shell};
 use crate::screenshot::{self, ShotMode};
 use crate::ui::tree_view;
+use winapi::um::winuser::{PostMessageW, RedrawWindow, RDW_INVALIDATE, RDW_UPDATENOW};
 
 use super::{App, Document};
 
 impl App {
     /// 弹出文件对话框并打开所选收藏夹。
     pub fn browse_open(&self) {
-        let title = self.i18n.t("dialog.open_title").to_string();
-        let bookmarks = self.i18n.t("dialog.filter_bookmarks").to_string();
-        let html = self.i18n.t("dialog.filter_html").to_string();
+        let title = self.i18n.borrow().t("dialog.open_title").to_string();
+        let bookmarks = self.i18n.borrow().t("dialog.filter_bookmarks").to_string();
+        let html = self.i18n.borrow().t("dialog.filter_html").to_string();
 
         // 默认从「下载」目录开始；取不到时退回当前文档目录，再退回系统记忆
         let initial_dir = crate::platform::paths::downloads_dir().or_else(|| {
@@ -41,7 +42,7 @@ impl App {
 
     /// 读取并解析收藏夹文件，成功后重建整棵树。
     pub fn open_file(&self, path: &Path) {
-        // 与原版一致：先转成绝对路径，路径栏与截图默认目录都基于它
+        // 转成绝对路径：路径栏与截图默认目录都基于它
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
 
         if !config::is_html_path(&path) {
@@ -75,17 +76,25 @@ impl App {
         };
 
         let content = encoding::decode_bookmarks(&bytes);
+        let (virtual_root, unnamed_folder, unnamed_link) = {
+            let i18n = self.i18n.borrow();
+            (
+                i18n.t("parser.virtual_root").to_string(),
+                i18n.t("parser.unnamed_folder").to_string(),
+                i18n.t("parser.unnamed_link").to_string(),
+            )
+        };
         let options = ParseOptions {
-            virtual_root: self.i18n.t("parser.virtual_root"),
-            unnamed_folder: self.i18n.t("parser.unnamed_folder"),
-            unnamed_link: self.i18n.t("parser.unnamed_link"),
+            virtual_root: &virtual_root,
+            unnamed_folder: &unnamed_folder,
+            unnamed_link: &unnamed_link,
         };
 
         let arena = match parser::parse_bookmarks_html(&content, &options) {
             Ok(arena) => arena,
             Err(error) => {
                 let message = match error {
-                    ParseError::MissingDl => self.i18n.t("parser.missing_dl").to_string(),
+                    ParseError::MissingDl => self.i18n.borrow().t("parser.missing_dl").to_string(),
                 };
                 self.error(
                     "error.parse_failed_title",
@@ -124,10 +133,14 @@ impl App {
         self.ui.filter_input.set_text("");
         self.filter_guard.set(false);
 
+        self.unload_favicons();
         self.rebuild_tree();
         self.relayout();
 
-        let message = self.i18n.fmt(
+        let load_icons = self.i18n.borrow().t("toolbar.load_icons").to_string();
+        self.ui.set_icons_button(&load_icons, true);
+
+        let message = self.i18n.borrow().fmt(
             "status.loaded",
             &[
                 ("folders", &total_folders.to_string()),
@@ -136,9 +149,9 @@ impl App {
         );
         self.set_status(message);
         self.update_info_bar();
+        self.ui.set_doc_buttons_enabled(true);
     }
 
-    /// 重新加载当前文件。
     pub fn reload(&self) {
         let path = {
             let state = self.state.borrow();
@@ -162,11 +175,13 @@ impl App {
             state.pending_urls.clear();
             state.urls_total = 0;
             state.urls_done = 0;
-            state.path_text = self.i18n.t("path.hint").to_string();
+            state.path_text = self.i18n.borrow().t("path.hint").to_string();
             state.path_text_width = 0;
             state.path_dim = true;
-            state.info = self.i18n.t("info.ready").to_string();
+            state.info = self.i18n.borrow().t("info.ready").to_string();
         }
+
+        self.unload_favicons();
 
         self.filter_guard.set(true);
         self.ui.filter_input.set_text("");
@@ -175,6 +190,7 @@ impl App {
         self.ui.tree.clear();
         self.relayout();
         self.set_status_idle();
+        self.ui.set_doc_buttons_enabled(false);
     }
 
     /// 输入变化后延迟应用筛选，避免每个按键都重建整棵树。
@@ -188,7 +204,6 @@ impl App {
         self.update_info_bar();
     }
 
-    /// 展开所有节点。
     pub fn expand_all(&self) {
         let items: Vec<nwg::TreeItem> = {
             let state = self.state.borrow();
@@ -215,10 +230,9 @@ impl App {
         self.update_info_bar();
     }
 
-    /// 折叠所有节点，但保留顶层展开（与原版一致）。
+    /// 折叠所有节点，保留顶层展开。
     pub fn collapse_all(&self) {
-        // 注意：不能用 ExpandState::CollapseReset —— 它对应 TVE_COLLAPSERESET，
-        // 会直接把子项删掉，之后再也展不开。
+        // 不能用 CollapseReset：它对应 TVE_COLLAPSERESET，会删除子项。
         let all: Vec<nwg::TreeItem> = {
             let state = self.state.borrow();
             state
@@ -272,7 +286,7 @@ impl App {
         let has_document = self.state.borrow().doc.is_some();
 
         let text = if !has_document {
-            self.i18n.t("info.ready").to_string()
+            self.i18n.borrow().t("info.ready").to_string()
         } else {
             let rows = self.collect_visible_rows();
             let mut shown_folders = 0usize;
@@ -300,7 +314,7 @@ impl App {
             let all_folders = total_folders.to_string();
             let all_links = total_links.to_string();
 
-            self.i18n.fmt(
+            self.i18n.borrow().fmt(
                 "info.format",
                 &[
                     ("shown_folders", &folders),
@@ -315,19 +329,46 @@ impl App {
         self.refresh_bars();
     }
 
-    /// 生成并保存长图截图。
     pub fn take_screenshot(&self, mode: ShotMode) {
         let rows = self.collect_visible_rows();
 
         if rows.is_empty() {
-            let text = self.i18n.t("screenshot.empty").to_string();
-            self.info_box("screenshot.empty_title", &text);
+            let text = self.i18n.borrow().t("screenshot.empty").to_string();
+            self.set_status(text);
             return;
         }
 
-        let png = match screenshot::render(&rows, mode) {
+        self.set_screenshot_busy(mode, true);
+        *self.pending_shot.borrow_mut() = Some(mode);
+
+        if let Some(hwnd) = self.ui.window.handle.hwnd() {
+            unsafe {
+                PostMessageW(hwnd, super::WM_APP_SCREENSHOT, 0, 0);
+            }
+        }
+    }
+
+    /// 由 `WM_APP_SCREENSHOT` 触发：按钮已完成重绘，这里才做耗时的渲染。
+    pub(crate) fn run_pending_screenshot(&self) {
+        let Some(mode) = self.pending_shot.borrow_mut().take() else {
+            return;
+        };
+
+        // 此时已不在按钮的点击派发中，重绘能真正生效
+        self.set_screenshot_busy(mode, true);
+
+        let rows = self.collect_visible_rows();
+        let favicons = self.favicons.borrow();
+        let globe = crate::ui::icons::globe_icon();
+        let set = favicons.as_ref().map(|fav| screenshot::FaviconPixels {
+            pixels: &fav.pixels,
+            indices: &fav.indices,
+            globe: &globe,
+        });
+        let png = match screenshot::render_with_favicons(&rows, mode, set) {
             Ok(bytes) => bytes,
             Err(error) => {
+                self.set_screenshot_busy(mode, false);
                 self.error(
                     "error.screenshot_failed_title",
                     "error.screenshot_failed",
@@ -337,10 +378,12 @@ impl App {
             }
         };
 
+        self.set_screenshot_busy(mode, false);
+
         let (directory, file_name) = self.screenshot_target();
-        let title = self.i18n.t("dialog.save_title").to_string();
-        let png_filter = self.i18n.t("dialog.filter_png").to_string();
-        let all_filter = self.i18n.t("dialog.filter_all").to_string();
+        let title = self.i18n.borrow().t("dialog.save_title").to_string();
+        let png_filter = self.i18n.borrow().t("dialog.filter_png").to_string();
+        let all_filter = self.i18n.borrow().t("dialog.filter_all").to_string();
 
         let Some(mut path) = dialogs::save_png(
             self.ui.window.handle.hwnd(),
@@ -350,7 +393,7 @@ impl App {
             &png_filter,
             &all_filter,
         ) else {
-            let message = self.i18n.t("status.screenshot_cancelled").to_string();
+            let message = self.i18n.borrow().t("status.screenshot_cancelled").to_string();
             self.set_status(message);
             return;
         };
@@ -365,7 +408,7 @@ impl App {
 
         match screenshot::save(&path, &png) {
             Ok(()) => {
-                let message = self.i18n.fmt(
+                let message = self.i18n.borrow().fmt(
                     "status.screenshot_saved",
                     &[("path", &path.to_string_lossy())],
                 );
@@ -381,10 +424,41 @@ impl App {
         }
     }
 
+    fn set_screenshot_busy(&self, mode: ShotMode, busy: bool) {
+        let (button, label) = match mode {
+            ShotMode::Full => (&self.ui.btn_shot_full, "toolbar.screenshot_full"),
+            ShotMode::Neutral => (&self.ui.btn_shot_neutral, "toolbar.screenshot_neutral"),
+        };
+
+        let text = if busy {
+            self.i18n.borrow().t("toolbar.screenshotting").to_string()
+        } else {
+            self.i18n.borrow().t(label).to_string()
+        };
+        button.set_text(&text);
+        button.set_enabled(!busy);
+
+        if let Some(hwnd) = button.handle.hwnd() {
+            unsafe {
+                RedrawWindow(
+                    hwnd,
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                    RDW_INVALIDATE | RDW_UPDATENOW,
+                );
+            }
+        }
+    }
+
     /// 截图默认目录与文件名。
     fn screenshot_target(&self) -> (Option<std::path::PathBuf>, String) {
-        let suffix = self.i18n.t("screenshot.default_suffix");
-        let fallback = self.i18n.t("screenshot.fallback_stem");
+        let (suffix, fallback) = {
+            let i18n = self.i18n.borrow();
+            (
+                i18n.t("screenshot.default_suffix").to_string(),
+                i18n.t("screenshot.fallback_stem").to_string(),
+            )
+        };
 
         let state = self.state.borrow();
         match state.doc.as_ref() {
@@ -403,7 +477,6 @@ impl App {
         }
     }
 
-    /// 用系统浏览器打开链接。
     pub fn open_url(&self, url: &str) {
         if let Err(error) = shell::open_url(url) {
             self.error(
@@ -428,7 +501,7 @@ impl App {
             state.urls_done = 0;
         }
 
-        let message = self.i18n.fmt(
+        let message = self.i18n.borrow().fmt(
             "status.opening_progress",
             &[("done", "0"), ("total", &total.to_string())],
         );
@@ -438,7 +511,6 @@ impl App {
         self.ui.open_timer.start();
     }
 
-    /// 打开队列中的下一个链接。
     pub fn open_next_url(&self) {
         let next = {
             let mut state = self.state.borrow_mut();
@@ -453,7 +525,7 @@ impl App {
                     state.urls_done += 1;
                     (state.urls_done, state.urls_total)
                 };
-                let message = self.i18n.fmt(
+                let message = self.i18n.borrow().fmt(
                     "status.opening_progress",
                     &[("done", &done.to_string()), ("total", &total.to_string())],
                 );
@@ -464,6 +536,7 @@ impl App {
                 let total = self.state.borrow().urls_total;
                 let message = self
                     .i18n
+                    .borrow()
                     .fmt("status.opened_all", &[("total", &total.to_string())]);
                 self.set_status(message);
             }
@@ -480,8 +553,8 @@ impl App {
         match html.first() {
             Some(path) => self.open_file(Path::new(path)),
             None => {
-                let text = self.i18n.t("error.unsupported_drop").to_string();
-                let title = self.i18n.t("error.unsupported_format_title").to_string();
+                let text = self.i18n.borrow().t("error.unsupported_drop").to_string();
+                let title = self.i18n.borrow().t("error.unsupported_format_title").to_string();
                 shell::message(
                     self.ui.window.handle.hwnd(),
                     &title,

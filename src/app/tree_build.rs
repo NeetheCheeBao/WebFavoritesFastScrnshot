@@ -1,7 +1,4 @@
-//! 树的构建与"可见行"统计。
-//!
-//! 整棵树在打开文件时一次性插入，之后展开/折叠只是原生控件的状态切换，
-//! 因此点击展开是瞬时的（与原版一致）。
+//! 树的构建与可见行统计；整棵树一次性插入，展开/折叠只切换控件状态。
 
 use native_windows_gui as nwg;
 
@@ -58,6 +55,7 @@ impl App {
             state.doc = Some(document);
         }
 
+        self.apply_favicon_indices();
         self.update_scrollbars();
     }
 
@@ -181,11 +179,8 @@ impl App {
         Some(item)
     }
 
-    /// 同时设置普通态与选中态图标。
-    ///
-    /// NWG 的 `set_item_image(item, index, on_select)` 里，`on_select = true`
-    /// 只写 `TVIF_SELECTEDIMAGE`（选中态），普通态必须用 `false` 单独设置。
-    fn set_item_icon(&self, item: &nwg::TreeItem, icon: i32) {
+/// `on_select = true` 只写选中态图标，普通态需用 `false` 单独设置。
+    pub(crate) fn set_item_icon(&self, item: &nwg::TreeItem, icon: i32) {
         self.ui.tree.set_item_image(item, icon, false);
         self.ui.tree.set_item_image(item, icon, true);
     }
@@ -262,7 +257,7 @@ fn collect_rows(
     let has_children = !data.children.is_empty();
     // 只有含子项的文件夹才需要向控件询问展开状态；链接节点跳过查询
     let is_open = has_children && tree_view::is_expanded(tree, item);
-    // 标题直接取模型：逐行发 TVM_GETITEMW 是展开卡顿的主因之一
+    // 标题取模型，避免逐行查询控件
     let text = if depth == 0 && data.is_folder {
         document.file_name.clone()
     } else {

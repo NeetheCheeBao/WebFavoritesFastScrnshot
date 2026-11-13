@@ -1,6 +1,7 @@
 //! 应用主体：状态、事件分发、自绘栏刷新。
 
 mod commands;
+mod favicons;
 mod menu;
 mod tree_build;
 
@@ -11,11 +12,11 @@ use std::rc::Rc;
 
 use native_windows_gui as nwg;
 use winapi::shared::minwindef::{LPARAM, LRESULT, WPARAM};
-use winapi::shared::windef::HWND;
+use winapi::shared::windef::{HWND, POINT, RECT};
 use winapi::um::winuser::{
-    GetKeyState, InvalidateRect, LoadCursorW, SetCursor, TrackMouseEvent, IDC_HAND, TME_LEAVE,
-    TRACKMOUSEEVENT, VK_CONTROL, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSELEAVE, WM_MOUSEMOVE,
-    WM_PAINT, WM_SETCURSOR,
+    GetKeyState, GetWindowRect, InvalidateRect, LoadCursorW, SetCursor, TrackMouseEvent, IDC_HAND,
+    MINMAXINFO, TME_LEAVE, TRACKMOUSEEVENT, VK_CONTROL, WM_ERASEBKGND, WM_GETMINMAXINFO,
+    WM_LBUTTONUP, WM_MOUSELEAVE, WM_MOUSEMOVE, WM_PAINT, WM_SETCURSOR,
 };
 
 use crate::config::AppMeta;
@@ -25,7 +26,13 @@ use crate::platform::dpi;
 use crate::platform::shell::{self, MessageIcon};
 use crate::ui::bars::{self, BarContent, BarFonts};
 use crate::ui::layout::{Rects, Ui, MIN_HEIGHT, MIN_WIDTH};
+use crate::ui::main_menu::{self, MainMenuAction};
 use crate::ui::tree_view;
+
+/// 截图按钮进入忙状态后，用该消息把渲染推迟到按钮完成重绘之后。
+const WM_APP_SCREENSHOT: u32 = 0x8000 + 1;
+/// 图标按钮进入「加载中」后，把解码推迟到按钮重绘之后。
+const WM_APP_LOAD_ICONS: u32 = 0x8000 + 2;
 
 /// 已加载的收藏夹文档。
 pub struct Document {
@@ -38,7 +45,7 @@ pub struct Document {
 
 /// 状态栏内容。
 pub enum Status {
-    /// 空闲：显示可点击的版权信息
+    /// 空闲：显示可点击的信息
     Idle,
     /// 业务消息
     Message(String),
@@ -84,11 +91,22 @@ impl State {
     }
 }
 
-/// 应用实例。控件不可变，可变数据放在 `RefCell` 中，
-/// 以便事件回调以 `Rc<App>` 形式共享。
+/// 已加载的 favicon：ImageList 必须存活到卸载为止。
+pub struct Favicons {
+    /// 仅用于持有 ImageList，防止树仍引用时被释放
+    #[allow(dead_code)]
+    pub list: nwg::ImageList,
+    /// 节点下标 -> 图像索引；无 favicon 的节点为 `None`
+    pub indices: Vec<Option<i32>>,
+    /// 去重后的 16×16 RGBA 像素，供截图复用
+    pub pixels: Vec<Vec<u8>>,
+}
+
+/// 应用实例；可变数据放在 `RefCell` 中，供事件回调共享。
 pub struct App {
     pub ui: Ui,
-    pub i18n: I18n,
+    pub i18n: RefCell<I18n>,
+    pub meta: AppMeta,
     pub state: RefCell<State>,
     pub bars: RefCell<BarFonts>,
     pub rects: RefCell<Rects>,
@@ -97,6 +115,8 @@ pub struct App {
     pub filter_guard: Cell<bool>,
     /// 批量展开/折叠期间抑制信息栏重算，避免 O(n²)
     pub suppress_info: Cell<bool>,
+    pub favicons: RefCell<Option<Favicons>>,
+    pub pending_shot: RefCell<Option<crate::screenshot::ShotMode>>,
 }
 
 impl App {
@@ -108,7 +128,8 @@ impl App {
 
         let app = App {
             ui,
-            i18n,
+            i18n: RefCell::new(i18n),
+            meta,
             state: RefCell::new(state),
             bars: RefCell::new(BarFonts::new(dpi::scaled(12), "Microsoft YaHei UI")),
             rects: RefCell::new(Rects::default()),
@@ -116,11 +137,14 @@ impl App {
             raw_handlers: RefCell::new(Vec::new()),
             filter_guard: Cell::new(false),
             suppress_info: Cell::new(false),
+            favicons: RefCell::new(None),
+            pending_shot: RefCell::new(None),
         };
 
         let rects = app.ui.layout();
         *app.rects.borrow_mut() = rects;
         app.update_scrollbars();
+        app.ui.set_doc_buttons_enabled(false);
 
         Ok(app)
     }
@@ -150,6 +174,7 @@ impl App {
         }
 
         self.refresh_bars();
+        self.ui.window.set_visible(true);
         nwg::dispatch_thread_events();
     }
 
@@ -161,6 +186,10 @@ impl App {
                     self.browse_open();
                 } else if handle == self.ui.btn_close {
                     self.close_file();
+                } else if handle == self.ui.btn_icons {
+                    self.toggle_favicons();
+                } else if handle == self.ui.btn_menu {
+                    self.show_main_menu();
                 } else if handle == self.ui.btn_shot_full {
                     self.take_screenshot(crate::screenshot::ShotMode::Full);
                 } else if handle == self.ui.btn_shot_neutral {
@@ -212,8 +241,7 @@ impl App {
                 }
             }
             nwg::Event::OnResize | nwg::Event::OnWindowMaximize => {
-                // 子控件也会冒泡出 OnResize，只有主窗口才需要重新布局；
-                // 最大化时系统只发 SIZE_MAXIMIZED，不会补发 OnResize
+                // 子控件也会冒泡 OnResize；最大化只发 SIZE_MAXIMIZED，不补发 OnResize
                 if handle == self.ui.window.handle {
                     self.relayout();
                 }
@@ -231,15 +259,137 @@ impl App {
         }
     }
 
+    /// 汉堡菜单：语言包与检查更新。
+    fn show_main_menu(&self) {
+        let (Some(hwnd), Some(button)) = (
+            self.ui.window.handle.hwnd(),
+            self.ui.btn_menu.handle.hwnd(),
+        ) else {
+            return;
+        };
+
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetWindowRect(button, &mut rect);
+        }
+        let anchor = POINT {
+            x: rect.left,
+            y: rect.bottom,
+        };
+
+        let languages = I18n::languages();
+        let action = main_menu::show(
+            hwnd,
+            anchor,
+            self.i18n.borrow().t("menu.language"),
+            self.i18n.borrow().t("menu.check_updates"),
+            &languages,
+            self.i18n.borrow().code(),
+        );
+
+        match action {
+            Some(MainMenuAction::CheckUpdates) => {
+                if let Err(error) = shell::open_url(crate::config::RELEASES_URL) {
+                    self.error(
+                        "error.open_failed_title",
+                        "error.open_failed",
+                        &[("error", &error)],
+                    );
+                }
+            }
+            Some(MainMenuAction::Language(code)) => {
+                let name = languages
+                    .iter()
+                    .find(|(item, _)| *item == code)
+                    .map(|(_, name)| name.clone())
+                    .unwrap_or_else(|| code.clone());
+
+                if code != self.i18n.borrow().code() {
+                    self.apply_language(&code);
+                } else {
+                    let message = self.i18n
+                        .borrow()
+                        .fmt("status.language_current", &[("name", &name)]);
+                    self.set_status(message);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// 切换语言：替换语言包并重建全部界面文案。
+    fn apply_language(&self, code: &str) {
+        let Some(i18n) = I18n::load_code(code) else {
+            return;
+        };
+        *self.i18n.borrow_mut() = i18n;
+
+        {
+            let i18n = self.i18n.borrow();
+            self.ui.retranslate(&i18n, &self.meta);
+        }
+
+        let icons_key = if self.favicons.borrow().is_some() {
+            "toolbar.unload_icons"
+        } else {
+            "toolbar.load_icons"
+        };
+        self.ui.btn_icons.set_text(self.i18n.borrow().t(icons_key));
+
+        if self.state.borrow().doc.is_none() {
+            let (hint, ready) = {
+                let i18n = self.i18n.borrow();
+                (i18n.t("path.hint").to_string(), i18n.t("info.ready").to_string())
+            };
+            let mut state = self.state.borrow_mut();
+            state.path_text = hint;
+            state.path_text_width = 0;
+            state.path_dim = true;
+            state.info = ready;
+        }
+
+        // 新语言的按钮更宽时，把窗口撑到能完整容纳工具栏
+        let needed = self.ui.toolbar_width() + dpi::scaled(28);
+        let (current_width, current_height) = self.ui.window.size();
+        if (current_width as i32) < needed {
+            self.ui.window.set_size(needed as u32, current_height);
+        }
+
+        self.relayout();
+        self.update_info_bar();
+        self.set_status_idle();
+        self.refresh_bars();
+    }
+
     /// 处理主窗口的原始消息：背景擦除、两条栏绘制、链接悬停与点击。
     fn on_raw_message(
         &self,
         hwnd: HWND,
         message: u32,
         _wparam: WPARAM,
-        _lparam: LPARAM,
+        lparam: LPARAM,
     ) -> Option<LRESULT> {
         match message {
+            WM_GETMINMAXINFO => {
+                let info = lparam as *mut MINMAXINFO;
+                if !info.is_null() {
+                    // 最小宽度跟随当前语言的工具栏宽度，避免按钮被窗口裁掉
+                    let toolbar = self.ui.toolbar_width() + dpi::scaled(28);
+                    unsafe {
+                        (*info).ptMinTrackSize.x = toolbar.max(dpi::scaled(MIN_WIDTH));
+                        (*info).ptMinTrackSize.y = dpi::scaled(MIN_HEIGHT);
+                    }
+                }
+                Some(0)
+            }
+            WM_APP_SCREENSHOT => {
+                self.run_pending_screenshot();
+                Some(0)
+            }
+            WM_APP_LOAD_ICONS => {
+                self.load_favicons();
+                Some(0)
+            }
             WM_ERASEBKGND => {
                 self.draw_bars(hwnd, true);
                 Some(1)
@@ -305,7 +455,6 @@ impl App {
         }
     }
 
-    /// 请求重绘自绘区域。
     pub fn refresh_bars(&self) {
         if let Some(hwnd) = self.ui.window.handle.hwnd() {
             unsafe {
@@ -314,7 +463,6 @@ impl App {
         }
     }
 
-    /// 重新计算控件位置并刷新自绘区域。
     fn relayout(&self) {
         let rects = self.ui.layout();
         *self.rects.borrow_mut() = rects;
@@ -322,10 +470,7 @@ impl App {
         self.refresh_bars();
     }
 
-    /// 滚动条按需显示：空闲时都没有；内容放得下时也不出现。
-    ///
-    /// 做法是先两条都打开让控件算出真实滚动范围，再用 `GetScrollInfo` 判断是否需要，
-    /// 最后按判断结果关闭多余的一条。测量与切换期间挂起重绘，避免闪烁。
+    /// 按可见行数与最大行宽决定是否显示滚动条。
     pub fn update_scrollbars(&self) {
         let Some(hwnd) = self.ui.tree.handle.hwnd() else {
             return;
@@ -374,22 +519,20 @@ impl App {
         tree_view::refresh(&self.ui.tree);
     }
 
-    /// 更新状态栏为一条业务消息。
     pub fn set_status(&self, text: String) {
         self.state.borrow_mut().status = Status::Message(text);
         self.refresh_bars();
     }
 
-    /// 状态栏回到空闲（显示版权信息）。
+    /// 状态栏回到空闲
     pub fn set_status_idle(&self) {
         self.state.borrow_mut().status = Status::Idle;
         self.refresh_bars();
     }
 
-    /// 弹出错误提示。
     pub fn error(&self, title_key: &str, text_key: &str, args: &[(&str, &str)]) {
-        let title = self.i18n.t(title_key).to_string();
-        let text = self.i18n.fmt(text_key, args);
+        let title = self.i18n.borrow().t(title_key).to_string();
+        let text = self.i18n.borrow().fmt(text_key, args);
         shell::message(
             self.ui.window.handle.hwnd(),
             &title,
@@ -398,9 +541,8 @@ impl App {
         );
     }
 
-    /// 弹出信息提示。
     pub fn info_box(&self, title_key: &str, text: &str) {
-        let title = self.i18n.t(title_key).to_string();
+        let title = self.i18n.borrow().t(title_key).to_string();
         shell::message(
             self.ui.window.handle.hwnd(),
             &title,

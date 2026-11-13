@@ -77,12 +77,25 @@ impl App {
             return;
         };
 
+        let labels: Vec<String> = {
+            let i18n = self.i18n.borrow();
+            [
+                "menu.open_in_browser",
+                "menu.copy_url",
+                "menu.copy_title",
+                "menu.expand_item",
+                "menu.collapse_item",
+            ]
+            .iter()
+            .map(|key| i18n.t(key).to_string())
+            .collect()
+        };
         let labels = [
-            self.i18n.t("menu.open_in_browser"),
-            self.i18n.t("menu.copy_url"),
-            self.i18n.t("menu.copy_title"),
-            self.i18n.t("menu.expand_item"),
-            self.i18n.t("menu.collapse_item"),
+            labels[0].as_str(),
+            labels[1].as_str(),
+            labels[2].as_str(),
+            labels[3].as_str(),
+            labels[4].as_str(),
         ];
 
         let Some(action) = context_menu::show(hwnd, labels) else {
@@ -119,7 +132,7 @@ impl App {
             match url {
                 Some(url) => self.open_url(&url),
                 None => {
-                    let message = self.i18n.t("status.no_openable_link").to_string();
+                    let message = self.i18n.borrow().t("status.no_openable_link").to_string();
                     self.set_status(message);
                 }
             }
@@ -127,16 +140,16 @@ impl App {
         }
 
         if urls.is_empty() {
-            let text = self.i18n.fmt("folder.empty", &[("title", &title)]);
+            let text = self.i18n.borrow().fmt("folder.empty", &[("title", &title)]);
             self.info_box("folder.empty_title", &text);
             return;
         }
 
-        let text = self.i18n.fmt(
+        let text = self.i18n.borrow().fmt(
             "folder.confirm",
             &[("title", &title), ("count", &urls.len().to_string())],
         );
-        let confirm_title = self.i18n.t("folder.confirm_title").to_string();
+        let confirm_title = self.i18n.borrow().t("folder.confirm_title").to_string();
 
         if shell::confirm(self.ui.window.handle.hwnd(), &confirm_title, &text) {
             self.start_sequential_open(urls);
@@ -155,11 +168,11 @@ impl App {
         match url {
             Some(url) => {
                 shell::copy_text(&url);
-                let message = self.i18n.t("status.copied_url").to_string();
+                let message = self.i18n.borrow().t("status.copied_url").to_string();
                 self.set_status(message);
             }
             None => {
-                let message = self.i18n.t("status.no_link").to_string();
+                let message = self.i18n.borrow().t("status.no_link").to_string();
                 self.set_status(message);
             }
         }
@@ -184,7 +197,7 @@ impl App {
         };
 
         shell::copy_text(&text);
-        let message = self.i18n.t("status.copied_title").to_string();
+        let message = self.i18n.borrow().t("status.copied_title").to_string();
         self.set_status(message);
     }
 
