@@ -71,7 +71,7 @@ gh repo clone NeetheCheeBao/WebFavoritesFastScrnshot
 WebFavoritesFastScrnshot
 |   .gitignore
 |   build.bat                     # 一键编译脚本
-|   build.rs                      # 图标与版本信息
+|   build.rs                      # 图标资源
 |   Cargo.lock                    # 依赖版本锁定
 |   Cargo.toml                    # 依赖声明与 release 配置
 |   LICENSE

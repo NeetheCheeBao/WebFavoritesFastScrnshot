@@ -33,6 +33,10 @@ if errorlevel 1 goto :fail
 set "EXE_NAME="
 for %%F in (target\release\*.exe) do (
   copy /y "%%F" "%OUTDIR%\" >nul 2>&1
+  if errorlevel 1 (
+    echo ERROR: failed to copy %%~nxF - close the running exe and retry.
+    goto :fail
+  )
   set "EXE_NAME=%%~nxF"
 )
 if not defined EXE_NAME goto :fail

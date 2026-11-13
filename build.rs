@@ -1,13 +1,6 @@
-//! 构建脚本：把图标与版本信息写成 Windows 资源文件（`.res`）并链接进 exe。
-//!
-//! 全部用纯 Rust 生成，**不依赖 `windres` / `rc.exe`**：
-//! `.res` 只是「资源条目顺序拼接」的二进制容器，图标数据直接取自 `.ico`，
-//! 版本信息按 `VS_VERSIONINFO` 结构拼装。
-
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rerun-if-changed=version.ini");
     println!("cargo:rerun-if-changed=assets/icon.ico");
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -17,8 +10,6 @@ fn main() {
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default());
-
-    let (name, version) = read_metadata(&manifest_dir.join("version.ini"));
 
     let icon_path = manifest_dir.join("assets").join("icon.ico");
     let icon_bytes = match std::fs::read(&icon_path) {
@@ -37,7 +28,7 @@ fn main() {
         }
     };
 
-    let resource = build_resource(&images, &name, &version);
+    let resource = build_resource(&images);
     let res_path = out_dir.join("app.res");
     if let Err(error) = std::fs::write(&res_path, &resource) {
         println!("cargo:warning=无法写入资源文件：{error}");
@@ -45,31 +36,6 @@ fn main() {
     }
 
     println!("cargo:rustc-link-arg={}", res_path.display());
-}
-
-/// 从 `version.ini` 读取程序名与版本号。
-fn read_metadata(path: &Path) -> (String, String) {
-    let mut name = String::from("WebFavoritesFastScrnshot");
-    let mut version = String::from("1.0.0");
-
-    if let Ok(text) = std::fs::read_to_string(path) {
-        for line in text.lines() {
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            let value = value.trim().trim_matches('"').to_string();
-            if value.is_empty() {
-                continue;
-            }
-            match key.trim().to_ascii_lowercase().as_str() {
-                "name" => name = value,
-                "version" => version = value,
-                _ => {}
-            }
-        }
-    }
-
-    (name, version)
 }
 
 /// `.ico` 中的一张图片。
@@ -138,10 +104,10 @@ fn parse_ico(bytes: &[u8]) -> Option<Vec<IconImage>> {
 }
 
 /// 拼装整个 `.res` 文件。
-fn build_resource(images: &[IconImage], name: &str, version: &str) -> Vec<u8> {
+fn build_resource(images: &[IconImage]) -> Vec<u8> {
     let mut out = Vec::new();
 
-    // 与 windres 的输出保持一致：先写一个空条目占位
+    // 空条目占位（资源文件的固定开头）
     out.extend_from_slice(&entry(0, 0, 0, 0, &[]));
 
     // RT_ICON：每张图片一条，资源名从 1 开始
@@ -151,9 +117,6 @@ fn build_resource(images: &[IconImage], name: &str, version: &str) -> Vec<u8> {
 
     // RT_GROUP_ICON：图标组
     out.extend_from_slice(&entry(14, 1, 0x1010, 0x0409, &group_icon(images)));
-
-    // RT_VERSION：版本信息
-    out.extend_from_slice(&entry(16, 1, 0x0000, 0x0409, &version_info(name, version)));
 
     out
 }
@@ -204,123 +167,4 @@ fn group_icon(images: &[IconImage]) -> Vec<u8> {
     }
 
     out
-}
-
-/// 版本信息：`VS_VERSIONINFO` 结构。
-fn version_info(name: &str, version: &str) -> Vec<u8> {
-    let (major, minor, patch, build) = version_parts(version);
-
-    let mut fixed = Vec::with_capacity(52);
-    for value in [
-        0xFEEF_04BDu32,        // 签名
-        0x0001_0000,           // 结构版本
-        (major << 16) | minor, // 文件版本 MS
-        (patch << 16) | build, // 文件版本 LS
-        (major << 16) | minor, // 产品版本 MS
-        (patch << 16) | build, // 产品版本 LS
-        0,                     // 标志掩码
-        0,                     // 标志
-        0x0004_0004,           // 操作系统：NT / Windows 32
-        0x0000_0001,           // 文件类型：应用
-        0,                     // 子类型
-        0,                     // 日期 MS
-        0,                     // 日期 LS
-    ] {
-        fixed.extend_from_slice(&value.to_le_bytes());
-    }
-
-    let string = |key: &str, value: &str| {
-        let mut encoded: Vec<u8> = Vec::new();
-        for unit in value.encode_utf16() {
-            encoded.extend_from_slice(&unit.to_le_bytes());
-        }
-        encoded.extend_from_slice(&[0, 0]);
-        // 字符串型节点：wValueLength 以字符计（含结尾 0）
-        version_node(key, &encoded, (value.chars().count() + 1) as u16, 1, &[])
-    };
-
-    let table = version_node(
-        "040904B0",
-        &[],
-        0,
-        1,
-        &[
-            string("FileDescription", name),
-            string("FileVersion", version),
-            string("InternalName", name),
-            string("OriginalFilename", &format!("{name}.exe")),
-            string("ProductName", name),
-            string("ProductVersion", version),
-        ],
-    );
-
-    let string_file_info = version_node("StringFileInfo", &[], 0, 1, &[table]);
-
-    let mut translation = Vec::with_capacity(4);
-    translation.extend_from_slice(&0x0409u16.to_le_bytes());
-    translation.extend_from_slice(&0x04B0u16.to_le_bytes());
-    let var = version_node("Translation", &translation, 4, 0, &[]);
-    let var_file_info = version_node("VarFileInfo", &[], 0, 1, &[var]);
-
-    version_node(
-        "VS_VERSION_INFO",
-        &fixed,
-        52,
-        0,
-        &[string_file_info, var_file_info],
-    )
-}
-
-/// 一个版本信息节点：`wLength` + `wValueLength` + `wType` + 键 + 值 + 子节点。
-fn version_node(
-    key: &str,
-    value: &[u8],
-    value_length: u16,
-    value_type: u16,
-    children: &[Vec<u8>],
-) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(&0u16.to_le_bytes()); // 先占位，最后回填
-    out.extend_from_slice(&value_length.to_le_bytes());
-    out.extend_from_slice(&value_type.to_le_bytes());
-
-    for unit in key.encode_utf16() {
-        out.extend_from_slice(&unit.to_le_bytes());
-    }
-    out.extend_from_slice(&[0, 0]);
-    while out.len() % 4 != 0 {
-        out.push(0);
-    }
-
-    out.extend_from_slice(value);
-
-    if !children.is_empty() {
-        while out.len() % 4 != 0 {
-            out.push(0);
-        }
-        for child in children {
-            out.extend_from_slice(child);
-            while out.len() % 4 != 0 {
-                out.push(0);
-            }
-        }
-    }
-
-    let length = out.len() as u16;
-    out[0..2].copy_from_slice(&length.to_le_bytes());
-    out
-}
-
-/// 把 `2.0.0` 解析成四段数字。
-fn version_parts(version: &str) -> (u32, u32, u32, u32) {
-    let mut parts = version
-        .split('.')
-        .map(|part| part.trim().parse::<u32>().unwrap_or(0));
-
-    (
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-    )
 }
