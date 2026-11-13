@@ -1,8 +1,4 @@
-//! 语言包加载与文案查表。
-//!
-//! 语言文件放在项目根目录的 `lang/` 下，由 `lang/index.ini` 索引。
-//! 运行时优先读取磁盘上的语言文件，缺失时使用编译期嵌入的副本，
-//! 因此既支持"改文件即换文案"，也支持单文件分发。
+//! 语言包加载与文案查表；`lang/index.ini` 索引，磁盘优先，缺失时用编译期嵌入的副本。
 
 use std::collections::HashMap;
 
@@ -12,7 +8,10 @@ use crate::config::{ini::Ini, read_text, resource_candidates};
 const INDEX_INI: &str = include_str!("../../lang/index.ini");
 
 /// 内置语言包：语言代码 -> 文件内容（编译期嵌入）。
-const EMBEDDED_LOCALES: &[(&str, &str)] = &[("zh_cn", include_str!("../../lang/zh_cn.ini"))];
+const EMBEDDED_LOCALES: &[(&str, &str)] = &[
+    ("en_us", include_str!("../../lang/en_us.ini")),
+    ("zh_cn", include_str!("../../lang/zh_cn.ini")),
+];
 
 /// 默认语言代码，索引文件缺失时使用。
 const FALLBACK_CODE: &str = "zh_cn";
@@ -25,24 +24,31 @@ pub struct I18n {
 }
 
 impl I18n {
-    /// 按索引文件加载默认语言包。
     pub fn load() -> I18n {
-        let index = Ini::parse(INDEX_INI);
+        let index = Ini::parse(&index_text());
         let code = index
             .get("general", "default")
             .unwrap_or(FALLBACK_CODE)
             .to_ascii_lowercase();
+
+        I18n::load_code(&code).unwrap_or_else(|| {
+            let text = embedded_locale(FALLBACK_CODE).unwrap_or_default();
+            I18n::from_text(FALLBACK_CODE, text)
+        })
+    }
+
+    /// 按语言代码加载；磁盘优先，其次编译期嵌入。
+    pub fn load_code(code: &str) -> Option<I18n> {
+        let index = Ini::parse(&index_text());
         let file = index
-            .get(&code, "file")
+            .get(code, "file")
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("{code}.ini"));
 
         let text = read_text(&resource_candidates(&format!("lang/{file}")))
-            .or_else(|| embedded_locale(&code).map(|s| s.to_string()))
-            .or_else(|| embedded_locale(FALLBACK_CODE).map(|s| s.to_string()))
-            .unwrap_or_default();
+            .or_else(|| embedded_locale(code).map(|s| s.to_string()))?;
 
-        I18n::from_text(&code, &text)
+        Some(I18n::from_text(code, &text))
     }
 
     /// 从语言文件文本构建（供测试与将来切换语言使用）。
@@ -65,8 +71,27 @@ impl I18n {
         }
     }
 
+    /// 可用语言：`(代码, 显示名)`，按代码排序。
+    pub fn languages() -> Vec<(String, String)> {
+        let index = Ini::parse(&index_text());
+        let mut list: Vec<(String, String)> = index
+            .sections()
+            .into_iter()
+            .filter(|(section, _)| section.as_str() != "general")
+            .filter_map(|(section, entries)| {
+                let name = entries
+                    .iter()
+                    .find(|(key, _)| key.as_str() == "name")
+                    .map(|(_, value)| value.clone())?;
+                Some((section.clone(), name))
+            })
+            .collect();
+
+        list.sort_by(|a, b| a.0.cmp(&b.0));
+        list
+    }
+
     /// 当前语言代码，例如 `zh_cn`。
-    #[allow(dead_code)]
     pub fn code(&self) -> &str {
         &self.code
     }
@@ -86,7 +111,11 @@ impl I18n {
     }
 }
 
-/// 按语言代码取内置语言包内容。
+/// 索引文件文本：磁盘优先，缺失时用编译期副本。
+fn index_text() -> String {
+    read_text(&resource_candidates("lang/index.ini")).unwrap_or_else(|| INDEX_INI.to_string())
+}
+
 fn embedded_locale(code: &str) -> Option<&'static str> {
     EMBEDDED_LOCALES
         .iter()
