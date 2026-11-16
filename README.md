@@ -5,7 +5,7 @@
 [![Language](https://img.shields.io/badge/Language-Rust-orange.svg)](#)
 [![UI](https://img.shields.io/badge/UI-native--windows--gui-blueviolet.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-win.svg)](#)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 本地 **网页收藏夹 HTML** 树形查看器 + **快速长图截图** 小工具（Netscape Bookmark 格式）
 
@@ -137,4 +137,4 @@ WebFavoritesFastScrnshot
 
 ## ⚖️ 许可证
 
-本项目采用 MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
+本项目采用 GNU General Public License v3.0 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
